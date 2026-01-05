@@ -1,208 +1,135 @@
-# Switchyard
+# Switchyard Virtual Network Fabric
 
-**Switchyard** is a tiny, deterministic “virtual network” fabric for development/testing.  
-It routes **raw Ethernet frames** between user-space endpoints over a simple **localhost TCP** protocol.
-
-Right now it ships with:
-- a fabric daemon (`switchyardd.py`)
-- a Python client SDK (`switchyard.py`)
-- a UDP echo service (`svc_echo.py`)
-- a UDP “ping” client (`cli_udp_ping.py`)
-
-This is a foundation for building DHCP/DNS/ARP/NTP-style services in a controlled, inspectable environment before you ever touch real NICs/TAP/Npcap.
+Switchyard is a lightweight, deterministic virtual network fabric designed for VM experimentation, protocol testing, and educational networking work. It provides a simple message-based protocol for creating virtual Ethernet endpoints and exchanging raw frames between them, enabling you to build small, controlled network topologies without relying on real NICs or OS-level networking.
 
 ---
 
-## Why Switchyard exists
+## Features
 
-When you’re building a VM/emulator networking device, you want:
-- repeatable behavior (no “real network” chaos)
-- easy packet capture/analysis
-- a clear boundary between “VM world” and “host world”
-- a place to inject faults (drops/latency/reorder) later
-
-Switchyard provides that boundary.
+- Deterministic virtual network fabric
+- Multiple virtual Ethernet endpoints per client
+- Simple, documented wire protocol
+- ARP responder microservice
+- NTP responder microservice
+- UDP echo and UDP ping examples
+- Easy to extend with additional protocol services
+- Clean Python reference implementation
 
 ---
 
-## Quick start
+## Quick Start
 
-### Requirements
-- Python 3.10+ (tested on Windows with Python 3.12)
-- No third-party dependencies
-
-### Run (3 terminals)
-
-**Terminal 1 (fabric daemon):**
 ```bash
-python switchyardd.py
-Terminal 2 (UDP echo service):
+git clone https://github.com/<yourname>/switchyard
+cd switchyard
+python3 switchyardd.py
+```
 
-bash
-Copy code
-python svc_echo.py
-Terminal 3 (client ping):
+Then, in another terminal:
 
-bash
-Copy code
-python cli_udp_ping.py
-Expected output (client):
+```bash
+python3 cli_ntp.py
+```
 
-csharp
-Copy code
-[cli] sent ... b'marco polo'
-[cli] got reply ... b'marco polo'
-Project layout
-graphql
-Copy code
-switchyard/
-  switchyard.py      # SDK + protocol + packet primitives (Eth/IPv4/UDP)
-  switchyardd.py     # fabric daemon (MAC learning + flood on unknown/broadcast)
-  svc_echo.py        # UDP echo service (listens on UDP port 7007)
-  cli_udp_ping.py    # client that sends one UDP datagram and waits for echo
-How it works
-Transport / Control plane / Data plane
-All processes connect to the fabric daemon via TCP loopback (default 127.0.0.1:9999).
+Or try the UDP echo service:
 
-Messages are length-prefixed.
+```bash
+python3 svc_echo.py
+python3 cli_udp_ping.py
+```
 
-Control messages carry UTF-8 JSON.
+---
 
-Packet messages carry raw Ethernet frame bytes.
+## Architecture Overview
 
-Packet unit
-The fabric moves Ethernet frames (L2) as opaque bytes.
-This keeps ARP/DHCP/DNS feasible later (they fundamentally depend on L2/L3).
+Switchyard uses a simple client–server model:
 
-Switching behavior (v1)
-Learns source MAC → endpoint mapping
+```
++------------------+        +------------------+
+|   cli_ntp.py     | <----> |   switchyardd    |
++------------------+        +------------------+
+           ^                         |
+           |                         v
++------------------+        +------------------+
+|   svc_ntp.py     | <----> |   switchyardd    |
++------------------+        +------------------+
+```
 
-For unicast:
+- **switchyardd.py** — the fabric daemon; manages endpoints and frame delivery  
+- **switchyard.py** — protocol definitions and client SDK  
+- **svc_ntp.py** — NTP responder microservice  
+- **cli_ntp.py** — NTP client  
+- **svc_echo.py** — UDP echo service  
+- **cli_udp_ping.py** — UDP ping client  
 
-if destination MAC is known: deliver to that endpoint
+---
 
-otherwise: flood (like a switch)
+## Protocol Summary
 
-Broadcast MAC (ff:ff:ff:ff:ff:ff) floods
+Switchyard uses a simple binary protocol with a length prefix and message header.
 
-Locally administered MACs
-Switchyard uses a locally administered MAC prefix:
+| Message Type       | Purpose                                  |
+|--------------------|-------------------------------------------|
+| HELLO              | Client announces itself                   |
+| WELCOME            | Server assigns client ID                  |
+| ENDPOINT_CREATE    | Client requests a new virtual endpoint    |
+| ENDPOINT_CREATED   | Server confirms endpoint creation         |
+| PACKET_IN          | Client sends an Ethernet frame to fabric  |
+| PACKET_OUT         | Fabric delivers a frame to a client       |
+| ERROR              | Error or invalid request                  |
 
-02:53:59:xx:xx:xx (the 02 indicates a locally administered, unicast MAC)
+The protocol is intentionally minimal to keep implementations simple and hackable.
 
-Example:
+---
 
-02:53:59:00:00:01
+## Example: NTP Service
 
-02:53:59:00:00:02
+Start the fabric:
 
-This avoids using real vendor OUIs.
+```bash
+python3 switchyardd.py
+```
 
-Switchyard Protocol v1 (wire format)
-Each message on the TCP stream:
+Start the NTP service:
 
-u32 msg_len (network order) — number of bytes after this field
+```bash
+python3 svc_ntp.py
+```
 
-u16 version
+Query it:
 
-u16 type
+```bash
+python3 cli_ntp.py
+```
 
-u32 endpoint_id
+You’ll receive a valid NTP response generated entirely inside the virtual fabric.
 
-u32 flags
+---
 
-payload (msg_len - 12 bytes)
+## Roadmap
 
-Payload:
+- [ ] TAP/Npcap bridge for real NIC integration  
+- [ ] Packet impairment (latency, jitter, drop)  
+- [ ] DHCP microservice  
+- [ ] Wireshark capture export  
+- [ ] C rewrite of the fabric core  
+- [ ] Multi-client topologies  
+- [ ] IPv6 support  
 
-Control plane: UTF-8 JSON bytes
+---
 
-Data plane:
+## Why This Exists
 
-PACKET_OUT: raw Ethernet frame bytes (client → fabric)
+Switchyard was created to provide a deterministic, lightweight virtual network fabric for VM and emulator development. Existing tools were either too heavy, too opaque, or too tied to real network interfaces. This project aims to be simple, hackable, and educational — a foundation for experimenting with network protocols and microservices.
 
-PACKET_IN: raw Ethernet frame bytes (fabric → subscriber)
+---
 
-Message types (current):
+## Contributing
 
-HELLO, WELCOME
+Pull requests are welcome.  
+If you plan to make significant changes, please open an issue first to discuss your ideas.
 
-ENDPOINT_CREATE, ENDPOINT_CREATED
-
-ENDPOINT_LOOKUP, ENDPOINT_INFO
-
-SUBSCRIBE, SUBSCRIBED
-
-PACKET_OUT, PACKET_IN
-
-ERROR
-
-Demo services
-UDP Echo service
-svc_echo.py subscribes to its endpoint and:
-
-accepts IPv4/UDP frames
-
-if UDP dst port == 7007, replies with the same payload
-
-UDP ping client
-cli_udp_ping.py:
-
-creates a client endpoint
-
-looks up the echo endpoint by name
-
-sends one UDP payload ("marco polo" by default)
-
-waits for the echo
-
-You can override the ping message:
-
-bash
-Copy code
-set PING_MSG=hello
-python cli_udp_ping.py
-(or PING_MSG=hello python cli_udp_ping.py on bash)
-
-Extending Switchyard (recommended next steps)
-Good next additions:
-
-Sniffer tool (promiscuous subscriber) to print decoded frames
-
-ARP microservice so clients can resolve MACs from IP (no hardcoded MACs)
-
-NTP-lite responder (UDP/123)
-
-Capture ring + replay in switchyardd.py
-
-Impairments (drop/dup/reorder/latency) for deterministic “bad network” tests
-
-Distributed firewall hooks (match/action rules at ingress)
-
-Troubleshooting
-“readexactly() called while another coroutine is already waiting…”
-Fix: ensure you’re using the updated switchyard.py where only the background pump
-reads from the socket and control replies are queued.
-
-Client can’t find the service endpoint
-Start the service (e.g. svc_echo.py) before the client, or add retry logic.
-
-Port conflicts
-Change the port in both daemon and clients (default 9999).
-
-Notes / design goals
-Keep the protocol stable so the fabric can be reimplemented later in C without changing tools.
-
-Start simple and deterministic; bridge to real networking only when needed.
-
-License
-TBD (choose MIT/Apache-2.0/BSD-2-Clause, etc.)
-
-pgsql
-Copy code
-
-If you want, I can also add a short “Roadmap” section tailored to your next three milestones (sniffer → ARP → NTP) and include the exact command lines for Windows + bash shells.
-::contentReference[oaicite:0]{index=0}
+---
 
 ## License
 
@@ -212,8 +139,4 @@ You may obtain a copy of the License in the `LICENSE` file included in this repo
 
 http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-
-
-
-
+See the NOTICE file for attribution information.
